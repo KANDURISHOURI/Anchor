@@ -33,12 +33,11 @@ struct TagData TagsToPublish[] = {NULL};
 struct TagData *TagsInfoDynamicMemory;
 struct TagData t1;
 
-int ArrayCount = 0;  // To know the total number of tags discovered
+int ArrayCount = 0;    // To know the total number of tags discovered
 bool CanStore = false; // waits for the ble beacons to be processed
 
 StaticJsonDocument<500> TagsJson;
 JsonArray ArrayJson = TagsJson.to<JsonArray>();
-
 
 volatile bool ConnectedToWifi = false;
 volatile bool ContinueScan = false;
@@ -48,6 +47,7 @@ extern volatile bool RestartAfterChanges;
 
 char DeviceManagementData[500];
 unsigned long AliveStatusTimer = 0;
+volatile bool AliveTimer = false;
 
 double Distance;
 
@@ -110,25 +110,62 @@ void checkAndConnectToWifi()
 
   switch (WiFi.status())
   {
-    case WL_CONNECTED:
-      WifiIpAddress = WiFi.localIP().toString();
-      ConnectedToWifi = true;
-      break;
-    case WL_IDLE_STATUS:
-    case WL_NO_SSID_AVAIL:
-      break;
-    case WL_SCAN_COMPLETED:
-    case WL_CONNECT_FAILED:
-    case WL_CONNECTION_LOST:
-    case WL_DISCONNECTED:
-      ConnectedToWifi = false;
-      WiFi.disconnect();
-      initWiFi();
-      getWifiStatus(WIFI_RECONNECTION_ATTEMPTS);
-      break;
-    default:
-      break;
+  case WL_CONNECTED:
+    WifiIpAddress = WiFi.localIP().toString();
+    ConnectedToWifi = true;
+    break;
+  case WL_IDLE_STATUS:
+  case WL_NO_SSID_AVAIL:
+    break;
+  case WL_SCAN_COMPLETED:
+  case WL_CONNECT_FAILED:
+  case WL_CONNECTION_LOST:
+  case WL_DISCONNECTED:
+    ConnectedToWifi = false;
+    WiFi.disconnect();
+    initWiFi();
+    getWifiStatus(WIFI_RECONNECTION_ATTEMPTS);
+    break;
+  default:
+    break;
   }
+}
+
+void checkTagAliveStatus()
+{
+  // Delete print statements in this function after testing//
+  Serial.println("Inside Alive Timeout Handler");
+  AliveChecking.detach();
+  if (ArrayCount)
+  {
+    Serial.println("Tags Available");
+    for (int i = 0; i < ArrayCount; i++)
+    {
+      int index = i;
+      if (millis() - TagsInfo[i].punchTime > 5000)
+      {
+        TagsInfo[i].punchTime = millis();
+        deleteTheTag(index);
+        // if (ArrayCount == 0)
+        // {
+        //   // memset(&TagsToPublish, NULL, sizeof(TagsToPublish));
+        //   // memset(&TagsInfo, NULL, sizeof(TagsInfo));
+        // }
+        Serial.print(TagsInfo[i].tagId);
+        Serial.println(" - TagDeleted");
+      }
+      else
+      {
+        Serial.print(TagsInfo[i].tagId);
+        Serial.println(" - TagAlive");
+      }
+    }
+  }
+  else
+  {
+    Serial.println("There are no tags in the vicinity. Scanning fo ACAC Beacons");
+  }
+  AliveChecking.attach(5, checkTagAliveStatus);
 }
 
 void timeoutHandler(int index)
@@ -138,63 +175,76 @@ void timeoutHandler(int index)
 
   JsonTagArrayCreation(index);
   publishBeaconData();
-  //ArrayCount = 0;
+  // ArrayCount = 0;
 
-  //memset(&TagsInfo, NULL, sizeof(TagsInfo)); //TODO: Deletion of particular Tag
+  // memset(&TagsInfo, NULL, sizeof(TagsInfo)); //TODO: Deletion of particular Tag
 
   TagsJson.clear();
   ArrayJson = TagsJson.to<JsonArray>();
 }
 
-
-void excludeFromArray(int index) {
+void excludeFromArray(int index)
+{
   memset(&TagsToPublish, NULL, sizeof(TagsToPublish));
   int count;
-  for (int i = 0; i < ArrayCount; i++) {
-    if (index == i) {
+  for (int i = 0; i < ArrayCount; i++)
+  {
+    if (index == i)
+    {
       Serial.println("Found the index to be ignored");
       Serial.println(TagsInfo[i].tagId);
     }
-    else {
+    else
+    {
       TagsToPublish[count++] = TagsInfo[i];
     }
   }
 }
 
-
-void deleteTheTag(int index) {
+void deleteTheTag(int index)
+{
   int arrayCount = ArrayCount;
 
-  if (index >= ArrayCount + 1) {
+  if (index >= ArrayCount + 1)
+  {
     ;
   }
-  for (int i = index; i < ArrayCount - 1; i++) {
+  for (int i = index; i < ArrayCount - 1; i++)
+  {
     TagsInfo[i] = TagsInfo[i + 1];
   }
 
   arrayCount -= 1;
-  if (arrayCount == 0) {
+  if (arrayCount == 0)
+  {
     ArrayCount = 0;
     memset(&TagsInfo, NULL, sizeof(TagsInfo));
-  } else {
+    AliveTimer = false;
+  }
+  else
+  {
     ArrayCount = arrayCount;
   }
   Serial.printf("ArrayCount After Deletion is %d\n", ArrayCount);
 }
-
-void checkTagsAliveStatus() {
-  if (ArrayCount) {
-    if (millis() > TagAliveStatusSlot) {
-      TagAliveStatusSlot = millis() + 10000;
-      for (int i = 0; i < ArrayCount; i++) {
-        if(TagsInfo[i].lastMillis != TagsInfo[i].currentMillis){
-          TagsInfo[i].currentMillis  = TagsInfo[i].lastMillis;
-        }
-      }
-    }
-  }
-}
-
+/*To Delete in future Versions*/
+// void checkTagsAliveStatus()
+// {
+//   if (ArrayCount)
+//   {
+//     if (millis() > TagAliveStatusSlot)
+//     {
+//       TagAliveStatusSlot = millis() + 10000;
+//       for (int i = 0; i < ArrayCount; i++)
+//       {
+//         if (TagsInfo[i].lastMillis != TagsInfo[i].currentMillis)
+//         {
+//           TagsInfo[i].currentMillis = TagsInfo[i].lastMillis;
+//         }
+//       }
+//     }
+//   }
+// }
 
 void formatAndAddTagData(TagData currentTagData, uint16_t currentESPTime)
 {
@@ -207,6 +257,13 @@ void formatAndAddTagData(TagData currentTagData, uint16_t currentESPTime)
     currentTagData.count += 1;
     memcpy(&TagsInfo[0], &currentTagData, sizeof(currentTagData));
     ArrayCount += 1;
+
+    if (!AliveTimer)
+    {
+      AliveTimer = true;
+      AliveChecking.attach(5, checkTagAliveStatus);
+    }
+
     return;
   }
 
@@ -251,10 +308,11 @@ void formatAndAddTagData(TagData currentTagData, uint16_t currentESPTime)
 }
 
 /*Converts RSSI to Distance*/
-void convertRssiToDistance(int rssi) {
+void convertRssiToDistance(int rssi)
+{
   double val = (-69 - (rssi)) * 0.05;
   Serial.println(val);
-  Distance = powf(10, val );
+  Distance = powf(10, val);
   Serial.printf("Distance : %f\n", Distance);
   Serial.println();
 }
@@ -262,86 +320,86 @@ void convertRssiToDistance(int rssi) {
 /* BLE Scan Callback -  Receives the BLE Devices found and processes the data */
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 {
-    void onResult(BLEAdvertisedDevice advertisedDevice)
+  void onResult(BLEAdvertisedDevice advertisedDevice)
+  {
+    if (!advertisedDevice.haveManufacturerData())
     {
-      if (!advertisedDevice.haveManufacturerData())
-      {
-        sendAnchorKeepAliveStatus();
-        return;
-      }
-
-      std::string manufRawData = advertisedDevice.getManufacturerData();
-      char *mdHexRep = BLEUtils::buildHexData(nullptr, (uint8_t *)manufRawData.data(), (uint8_t)manufRawData.length());
-      std::string manufData(mdHexRep);
-      free(mdHexRep);
-
-      if (strcmp(manufData.substr(0, 4).c_str(), "acac") == 0)
-      {
-
-        /*New Logic Tag Info Structure Initializations*/
-        struct TagData currentTagData = {
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          "."
-        };
-
-        AliveStatusTimer = millis();
-
-        currentTagData.rssi = advertisedDevice.getRSSI();
-        currentTagData.tagId = manufData.substr(4, 8).c_str();
-        currentTagData.txPower = atoi(manufData.substr(40, 2).c_str());
-
-        char *timeBuffer;
-        long timeNumber = strtol(manufData.substr(42, 2).c_str(), &timeBuffer, 16);
-        currentTagData.currentSeconds = timeNumber;
-
-        char *syncBuffer;
-        long syncTime = strtol((manufData.substr(46, 2) + manufData.substr(44, 2)).c_str(), &syncBuffer, 16);
-        currentTagData.timeSynchroMS = syncTime;
-
-        currentTagData.beaconCount = atoi(manufData.substr(48, 2).c_str());
-        Serial.printf("Beacon Count is %d \n", currentTagData.beaconCount);
-
-        CurrentTimeinEsp = millis();
-
-        formatAndAddTagData(currentTagData, CurrentTimeinEsp);
-      }
-      /*************************************************************************************************************************/
-      /// For FeasyBeacon
-      //      if (strcmp(manufData.substr(0, 4).c_str(), "4c00") == 0) {
-      //        if ((manufRawData.length() == 25) && (strcmp(manufData.substr(40, 4).c_str(), "4330") == 0)) {
-      //          RssiValue =  advertisedDevice.getRSSI();
-      //          TagIdNumber = manufData.substr(44, 4).c_str();
-      //          formatAndAddTagData(RssiValue, TagIdNumber, TagsInfo);
-      //        }
-      //      }
-
-      //      }
-      //      else {
-      //        JsonTagArrayCreation();
-      //        publishBeaconData();
-      //        PublishBeaconSlot = millis();
-      //        ArrayCount = 0;
-      //        TagInfo_t.rssi = 0;
-      //        TagInfo_t.count = 0;
-      //        TagInfo_t.tagId = ".";
-      //        memset(& TagsInfo, NULL, sizeof(TagsInfo));
-      //        memset(&t1, NULL, sizeof(t1));
-      //
-      //        TagsJson.clear();
-      //        ArrayJson = TagsJson.to<JsonArray>();
-      //      }
-      /******************************************************************************************************************************/
+      sendAnchorKeepAliveStatus();
+      return;
     }
+
+    std::string manufRawData = advertisedDevice.getManufacturerData();
+    char *mdHexRep = BLEUtils::buildHexData(nullptr, (uint8_t *)manufRawData.data(), (uint8_t)manufRawData.length());
+    std::string manufData(mdHexRep);
+    free(mdHexRep);
+
+    if (strcmp(manufData.substr(0, 4).c_str(), "acac") == 0)
+    {
+
+      /*New Logic Tag Info Structure Initializations*/
+      struct TagData currentTagData = {
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          ".",
+          0};
+
+      AliveStatusTimer = millis();
+
+      currentTagData.rssi = advertisedDevice.getRSSI();
+      currentTagData.tagId = manufData.substr(4, 8).c_str();
+      currentTagData.txPower = atoi(manufData.substr(40, 2).c_str());
+
+      char *timeBuffer;
+      long timeNumber = strtol(manufData.substr(42, 2).c_str(), &timeBuffer, 16);
+      currentTagData.currentSeconds = timeNumber;
+
+      char *syncBuffer;
+      long syncTime = strtol((manufData.substr(46, 2) + manufData.substr(44, 2)).c_str(), &syncBuffer, 16);
+      currentTagData.timeSynchroMS = syncTime;
+
+      currentTagData.beaconCount = atoi(manufData.substr(48, 2).c_str());
+      Serial.printf("Beacon Count is %d \n", currentTagData.beaconCount);
+
+      CurrentTimeinEsp = millis();
+
+      formatAndAddTagData(currentTagData, CurrentTimeinEsp);
+    }
+    /*************************************************************************************************************************/
+    /// For FeasyBeacon
+    //      if (strcmp(manufData.substr(0, 4).c_str(), "4c00") == 0) {
+    //        if ((manufRawData.length() == 25) && (strcmp(manufData.substr(40, 4).c_str(), "4330") == 0)) {
+    //          RssiValue =  advertisedDevice.getRSSI();
+    //          TagIdNumber = manufData.substr(44, 4).c_str();
+    //          formatAndAddTagData(RssiValue, TagIdNumber, TagsInfo);
+    //        }
+    //      }
+
+    //      }
+    //      else {
+    //        JsonTagArrayCreation();
+    //        publishBeaconData();
+    //        PublishBeaconSlot = millis();
+    //        ArrayCount = 0;
+    //        TagInfo_t.rssi = 0;
+    //        TagInfo_t.count = 0;
+    //        TagInfo_t.tagId = ".";
+    //        memset(& TagsInfo, NULL, sizeof(TagsInfo));
+    //        memset(&t1, NULL, sizeof(t1));
+    //
+    //        TagsJson.clear();
+    //        ArrayJson = TagsJson.to<JsonArray>();
+    //      }
+    /******************************************************************************************************************************/
+  }
 };
 
 void initBle()
@@ -598,7 +656,9 @@ void sendAnchorKeepAliveStatus()
     if (MqttClient.publish(MQTT_ANCHOR_ALIVE_STATUS, jsonBuffer1))
     {
       Serial.println("Alive Status Published");
-    } else {
+    }
+    else
+    {
       Serial.println("Anchor Busy");
     }
   }
@@ -614,7 +674,7 @@ void setup()
   resetEeprom();
 
   /* Dynamic Memory Allocation for Tags Array */
-  TagsInfoDynamicMemory = (TagData*)malloc(5 * sizeof(TagData));
+  TagsInfoDynamicMemory = (TagData *)malloc(5 * sizeof(TagData));
 
   if (TagsInfoDynamicMemory == NULL)
   {
@@ -641,14 +701,12 @@ void setup()
   initBle();
   setupMQTT();
   CanStore = true;
-
-
 }
 
 void loop()
 {
-
-  checkTagsAliveStatus();
+  /*To Delete in future Versions*/
+  // checkTagsAliveStatus();
   if (millis() > WifiConnectionSlot)
   {
     checkAndConnectToWifi();

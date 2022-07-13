@@ -9,7 +9,7 @@
 
 #define SCAN_TIME 10
 #define WIFI_RECONNECTION_ATTEMPTS 10
-#define EEPROM_RESET_INCREMENT_CODE 9
+#define EEPROM_RESET_INCREMENT_CODE 3
 
 #include "eeprom.h"
 #include <BLEDevice.h>
@@ -32,11 +32,11 @@ PubSubClient MqttClient(EspClient);
 
 /*Ticker Object */
 Ticker Publisher;
+Ticker AliveChecking;
 
 /*BLE Objects */
 BLEScan *pBLEScan;
 BLEAdvertising *pAdvertising;
-
 
 /*Old Logic Tag Info Structure*/
 struct TagInfo
@@ -72,4 +72,5 @@ struct TagData
   uint8_t beaconCount;
   uint8_t oldBeaconCount;
   String tagId;
+  unsigned long punchTime;
 };
