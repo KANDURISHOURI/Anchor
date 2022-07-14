@@ -30,7 +30,6 @@ unsigned long TagAliveStatusSlot;
 
 struct TagData TagsInfo[] = {NULL}; // Array of Structures
 struct TagData TagsToPublish[] = {NULL};
-struct TagData *TagsInfoDynamicMemory;
 struct TagData t1;
 
 int ArrayCount = 0;    // To know the total number of tags discovered
@@ -133,12 +132,9 @@ void checkAndConnectToWifi()
 
 void checkTagAliveStatus()
 {
-  // Delete print statements in this function after testing//
-  Serial.println("Inside Alive Timeout Handler");
   AliveChecking.detach();
   if (ArrayCount)
   {
-    Serial.println("Tags Available");
     for (int i = 0; i < ArrayCount; i++)
     {
       int index = i;
@@ -146,38 +142,35 @@ void checkTagAliveStatus()
       {
         TagsInfo[i].punchTime = millis();
         deleteTheTag(index);
-        // if (ArrayCount == 0)
-        // {
-        //   // memset(&TagsToPublish, NULL, sizeof(TagsToPublish));
-        //   // memset(&TagsInfo, NULL, sizeof(TagsInfo));
-        // }
+
+#if DEBUG
         Serial.print(TagsInfo[i].tagId);
         Serial.println(" - TagDeleted");
+#endif
       }
       else
       {
+
+#if DEBUG
         Serial.print(TagsInfo[i].tagId);
         Serial.println(" - TagAlive");
+#endif
       }
     }
   }
   else
   {
+#if DEBUG
     Serial.println("There are no tags in the vicinity. Scanning fo ACAC Beacons");
+#endif
   }
   AliveChecking.attach(5, checkTagAliveStatus);
 }
 
 void timeoutHandler(int index)
 {
-
-  Serial.println("Beacon Count 4 reached");
-
   JsonTagArrayCreation(index);
   publishBeaconData();
-  // ArrayCount = 0;
-
-  // memset(&TagsInfo, NULL, sizeof(TagsInfo)); //TODO: Deletion of particular Tag
 
   TagsJson.clear();
   ArrayJson = TagsJson.to<JsonArray>();
@@ -191,8 +184,9 @@ void excludeFromArray(int index)
   {
     if (index == i)
     {
-      Serial.println("Found the index to be ignored");
+#if DEBUG
       Serial.println(TagsInfo[i].tagId);
+#endif
     }
     else
     {
@@ -225,31 +219,10 @@ void deleteTheTag(int index)
   {
     ArrayCount = arrayCount;
   }
-  Serial.printf("ArrayCount After Deletion is %d\n", ArrayCount);
 }
-/*To Delete in future Versions*/
-// void checkTagsAliveStatus()
-// {
-//   if (ArrayCount)
-//   {
-//     if (millis() > TagAliveStatusSlot)
-//     {
-//       TagAliveStatusSlot = millis() + 10000;
-//       for (int i = 0; i < ArrayCount; i++)
-//       {
-//         if (TagsInfo[i].lastMillis != TagsInfo[i].currentMillis)
-//         {
-//           TagsInfo[i].currentMillis = TagsInfo[i].lastMillis;
-//         }
-//       }
-//     }
-//   }
-// }
 
 void formatAndAddTagData(TagData currentTagData, uint16_t currentESPTime)
 {
-  Serial.printf("Array Count is %d\n", ArrayCount);
-
   int index = -1;
 
   if (ArrayCount == 0)
@@ -300,7 +273,6 @@ void formatAndAddTagData(TagData currentTagData, uint16_t currentESPTime)
 
   if (index == -1)
   {
-    Serial.println("New Tag Addition");
     memcpy(&TagsInfo[ArrayCount], &currentTagData, sizeof(currentTagData));
     ArrayCount += 1;
     return;
@@ -367,38 +339,13 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
       currentTagData.timeSynchroMS = syncTime;
 
       currentTagData.beaconCount = atoi(manufData.substr(48, 2).c_str());
+#if DEBUG
       Serial.printf("Beacon Count is %d \n", currentTagData.beaconCount);
-
+#endif
       CurrentTimeinEsp = millis();
 
       formatAndAddTagData(currentTagData, CurrentTimeinEsp);
     }
-    /*************************************************************************************************************************/
-    /// For FeasyBeacon
-    //      if (strcmp(manufData.substr(0, 4).c_str(), "4c00") == 0) {
-    //        if ((manufRawData.length() == 25) && (strcmp(manufData.substr(40, 4).c_str(), "4330") == 0)) {
-    //          RssiValue =  advertisedDevice.getRSSI();
-    //          TagIdNumber = manufData.substr(44, 4).c_str();
-    //          formatAndAddTagData(RssiValue, TagIdNumber, TagsInfo);
-    //        }
-    //      }
-
-    //      }
-    //      else {
-    //        JsonTagArrayCreation();
-    //        publishBeaconData();
-    //        PublishBeaconSlot = millis();
-    //        ArrayCount = 0;
-    //        TagInfo_t.rssi = 0;
-    //        TagInfo_t.count = 0;
-    //        TagInfo_t.tagId = ".";
-    //        memset(& TagsInfo, NULL, sizeof(TagsInfo));
-    //        memset(&t1, NULL, sizeof(t1));
-    //
-    //        TagsJson.clear();
-    //        ArrayJson = TagsJson.to<JsonArray>();
-    //      }
-    /******************************************************************************************************************************/
   }
 };
 
@@ -635,9 +582,7 @@ void reconnect()
 #endif
       MqttClient.subscribe(DmReadRequest.c_str());
       MqttClient.subscribe(DmWriteRequest.c_str());
-      //      PublishBeaconSlot = millis();
       AliveStatusTimer = millis();
-      // Publisher.attach(2, timeoutHandler);
     }
   }
 }
@@ -655,11 +600,17 @@ void sendAnchorKeepAliveStatus()
     serializeJson(aliveStatus, jsonBuffer1);
     if (MqttClient.publish(MQTT_ANCHOR_ALIVE_STATUS, jsonBuffer1))
     {
+
+#if DEBUG
       Serial.println("Alive Status Published");
+#endif
     }
     else
     {
+
+#if DEBUG
       Serial.println("Anchor Busy");
+#endif
     }
   }
   delay(20);
@@ -672,14 +623,6 @@ void setup()
   EEPROM.begin(EEPROM_MAX_SIZE);
   eepromInit();
   resetEeprom();
-
-  /* Dynamic Memory Allocation for Tags Array */
-  TagsInfoDynamicMemory = (TagData *)malloc(5 * sizeof(TagData));
-
-  if (TagsInfoDynamicMemory == NULL)
-  {
-    Serial.println("Please make sure to Allocate Memory");
-  }
 
   if (strcmp(ANCHOR_NAME, AnchorName.c_str()) != 0)
   {
@@ -705,8 +648,6 @@ void setup()
 
 void loop()
 {
-  /*To Delete in future Versions*/
-  // checkTagsAliveStatus();
   if (millis() > WifiConnectionSlot)
   {
     checkAndConnectToWifi();
